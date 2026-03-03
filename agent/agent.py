@@ -394,8 +394,12 @@ def apply_code_diff(main_repo_dir = "env_grpo", new_repo_dir = "repo_variants/id
         return result
 
     try:
-        # Use patch to apply the diff in the new target repo
-        run(f"patch -p0 < {str(diff_file)}", cwd=".")
+        # Use patch to apply the diff in the new target repo.
+        # Use the absolute project root (parent of this file's directory) as cwd so that
+        # diff headers like "repo_variants_X/idea_N/file.py" resolve correctly regardless
+        # of the working directory the process was started from.
+        project_root = Path(__file__).resolve().parent.parent
+        run(f"patch -p0 < {str(Path(diff_file).resolve())}", cwd=str(project_root))
     except subprocess.CalledProcessError as e:
         # If patch fails, raise an error with details
         raise RuntimeError(
@@ -488,7 +492,7 @@ def feedback_loop(idea_idx = 6, idea_file = "agent/all_ideas.json", main_repo_di
         if trial_num == 1:
             response, thinking = generate_code_diff(idea_idx=idea_idx, base_dir="env_grpo", idea_file=idea_file)
         else:
-            response, thinking = generate_code_diff(idea_idx=idea_idx, base_dir="env_grpo", idea_file=idea_file, previous_diff_file=diff_file, previous_diff_error=diff_error_file)
+            response, thinking = generate_code_diff(idea_idx=idea_idx, base_dir="env_grpo", idea_file=idea_file, prev_diff_file=diff_file, prev_diff_error=diff_error_file)
         with open(diff_file, "w") as f:
             f.write(response)
         print (f"Diff file generated: {diff_file}")
@@ -546,7 +550,11 @@ def generate_code_diff_parallel(max_trials = 10, diffs_dir = "diffs_epoch1_paral
     map_func = partial(_generate_code_diff_parallel_helper, max_trials=max_trials, env_dir=env_dir, repo_dir=repo_dir, idea_file=idea_file, diffs_dir=diffs_dir, idea_lst=idea_lst, model_name=model_name)
     print(f"Using {total_workers} workers")
     with ThreadPoolExecutor(max_workers=total_workers) as executor:
-        executor.map(map_func, range(total_ideas))
+        try:
+            for _ in executor.map(map_func, range(total_ideas)):
+                pass
+        except Exception as e:
+            print(f"Unexpected exception from thread pool: {e}")
 
 def agent_call_idea(num_ideas = 200, cache_file = "ideas/all_ideas_claude_epoch2.json", run_name = "GRPO-env-test", epoch_num = 1, prev_ideas_file = "ideas/all_ideas_0826_epoch1.json", prev_training_logs = "training_logs/epoch1_retrywrapper/", top_k=20, sample_k=100, env_dir = "env_grpo", model_name = "gpt-5"):
     os.makedirs(os.path.dirname(cache_file), exist_ok=True)

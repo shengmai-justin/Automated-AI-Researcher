@@ -124,8 +124,20 @@ def _claude_qa(prompt: str, model_name: str, system_instruction: str, thinking_m
                 "content": system_instruction + "\n\n" + prompt
             }]
         )
-        thinking = response.content[0].thinking
-        response = response.content[1].text
+        content = response.content
+        thinking = None
+        text = None
+        for block in content:
+            if hasattr(block, "thinking") and getattr(block, "type", None) == "thinking":
+                thinking = block.thinking
+            elif hasattr(block, "text") and getattr(block, "type", None) == "text":
+                text = block.text
+        if text is None:
+            raise RuntimeError(
+                f"_claude_qa: no text block in response. "
+                f"Blocks: {[getattr(b, 'type', type(b).__name__) for b in content]}"
+            )
+        response = text
 
     else:
         response = client.messages.create(
@@ -260,6 +272,7 @@ def apiqa(prompt: str,
           max_trial: int = 1):
     set_keys()
     completion = None
+    last_error = None
     tries = 0
     while completion is None and tries < max_trial:
         try:
@@ -279,9 +292,15 @@ def apiqa(prompt: str,
             else:
                 completion = _gptqa(prompt, model_name, system_message, json_format, temperature, max_tokens)
         except Exception as e:
-            print(f"Trial {tries} with Exception: {str(e)}, sleeping for {2**tries} seconds")
-            time.sleep(2**tries)
+            last_error = e
+            sleep_time = min(2**tries, 60)
+            print(f"Trial {tries} with Exception: {str(e)}, sleeping for {sleep_time} seconds")
+            time.sleep(sleep_time)
             tries += 1
+    if completion is None:
+        raise RuntimeError(
+            f"API call failed after {max_trial} retries. Last error: {last_error}"
+        )
     return completion
 
 if __name__ == "__main__":
